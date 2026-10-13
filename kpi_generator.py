@@ -20,6 +20,10 @@ def validate_transactions(df):
     cleaned["type"] = cleaned["type"].astype("string").str.strip().str.lower()
     cleaned["amount"] = pd.to_numeric(cleaned["amount"], errors="coerce")
 
+    parsed_dates = pd.to_datetime(cleaned["date"], errors="coerce")
+    if parsed_dates.isna().any():
+        raise ValueError("Transaction dates must be valid dates.")
+
     if cleaned["type"].isna().any() or (cleaned["type"] == "").any():
         raise ValueError("Transaction type cannot be empty.")
     unsupported = sorted(set(cleaned["type"].dropna()) - SUPPORTED_TYPES)
