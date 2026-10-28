@@ -1,5 +1,5 @@
+import argparse
 import math
-import sys
 
 import pandas as pd
 
@@ -39,6 +39,30 @@ def validate_transactions(df):
     return cleaned
 
 
+def filter_transactions_by_period(df, start_date=None, end_date=None):
+    """Filter validated transactions by inclusive calendar dates."""
+    cleaned = validate_transactions(df)
+    dates = pd.to_datetime(cleaned["date"]).dt.normalize()
+    try:
+        start = pd.Timestamp(start_date).normalize() if start_date is not None else None
+        end = pd.Timestamp(end_date).normalize() if end_date is not None else None
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Date filters must be valid dates in YYYY-MM-DD format.") from exc
+
+    if start is not None and end is not None and start > end:
+        raise ValueError("Start date must be on or before end date.")
+
+    mask = pd.Series(True, index=cleaned.index)
+    if start is not None:
+        mask &= dates >= start
+    if end is not None:
+        mask &= dates <= end
+    filtered = cleaned.loc[mask].copy()
+    if filtered.empty:
+        raise ValueError("No transactions found within the selected date range.")
+    return filtered
+
+
 def calculate_kpis(df):
     """Calculate KPIs, print a human-readable report, and return reusable metrics."""
     df = validate_transactions(df)
@@ -73,19 +97,25 @@ def calculate_kpis(df):
     return summary
 
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python kpi_generator.py <csv_file>")
-        return
-
-    csv_file = sys.argv[1]
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Calculate KPIs from transaction CSV data.")
+    parser.add_argument("csv_file", help="CSV containing date, amount, and type columns")
+    parser.add_argument("--start-date", help="Inclusive reporting start date (YYYY-MM-DD)")
+    parser.add_argument("--end-date", help="Inclusive reporting end date (YYYY-MM-DD)")
+    args = parser.parse_args(argv)
 
     try:
-        df = pd.read_csv(csv_file)
+        df = pd.read_csv(args.csv_file)
+        if args.start_date is not None or args.end_date is not None:
+            df = filter_transactions_by_period(
+                df, start_date=args.start_date, end_date=args.end_date
+            )
         calculate_kpis(df)
-    except (OSError, pd.errors.ParserError, ValueError) as e:
-        print(f"❌ Error: {e}")
+        return 0
+    except (OSError, pd.errors.ParserError, ValueError) as exc:
+        print(f"❌ Error: {exc}")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
