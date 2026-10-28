@@ -8,6 +8,11 @@ REQUIRED_COLUMNS = {"date", "amount", "type"}
 SUPPORTED_TYPES = {"revenue", "expense"}
 
 
+def _parse_transaction_dates(values):
+    """Parse each date independently so date-only and timestamp strings can coexist."""
+    return values.map(lambda value: pd.to_datetime(value, errors="coerce"))
+
+
 def validate_transactions(df):
     """Return a validated copy with normalized transaction types and numeric amounts."""
     missing = REQUIRED_COLUMNS.difference(df.columns)
@@ -20,7 +25,7 @@ def validate_transactions(df):
     cleaned["type"] = cleaned["type"].astype("string").str.strip().str.lower()
     cleaned["amount"] = pd.to_numeric(cleaned["amount"], errors="coerce")
 
-    parsed_dates = pd.to_datetime(cleaned["date"], errors="coerce")
+    parsed_dates = _parse_transaction_dates(cleaned["date"])
     if parsed_dates.isna().any():
         raise ValueError("Transaction dates must be valid dates.")
 
@@ -42,7 +47,9 @@ def validate_transactions(df):
 def filter_transactions_by_period(df, start_date=None, end_date=None):
     """Filter validated transactions by inclusive calendar dates."""
     cleaned = validate_transactions(df)
-    dates = pd.to_datetime(cleaned["date"]).dt.normalize()
+    dates = _parse_transaction_dates(cleaned["date"]).map(
+        lambda value: value.normalize()
+    )
     try:
         start = pd.Timestamp(start_date).normalize() if start_date is not None else None
         end = pd.Timestamp(end_date).normalize() if end_date is not None else None
@@ -71,7 +78,7 @@ def calculate_kpis(df):
     profit = revenue - expenses
     profit_margin = (profit / revenue * 100) if revenue > 0 else 0
     expense_ratio = (expenses / revenue * 100) if revenue > 0 else 0
-    transaction_dates = pd.to_datetime(df["date"])
+    transaction_dates = _parse_transaction_dates(df["date"])
 
     summary = {
         "total_revenue": float(revenue),
