@@ -73,9 +73,17 @@ def filter_transactions_by_period(df, start_date=None, end_date=None):
 def calculate_kpis(df):
     """Calculate KPIs, print a human-readable report, and return reusable metrics."""
     df = validate_transactions(df)
-    revenue = df[df["type"] == "revenue"]["amount"].sum()
-    expenses = df[df["type"] == "expense"]["amount"].sum()
+    revenue_transactions = df.loc[df["type"] == "revenue", "amount"]
+    expense_transactions = df.loc[df["type"] == "expense", "amount"]
+    revenue = revenue_transactions.sum()
+    expenses = expense_transactions.sum()
     profit = revenue - expenses
+    average_revenue_transaction = (
+        revenue / len(revenue_transactions) if len(revenue_transactions) else 0
+    )
+    average_expense_transaction = (
+        expenses / len(expense_transactions) if len(expense_transactions) else 0
+    )
     profit_margin = (profit / revenue * 100) if revenue > 0 else 0
     expense_ratio = (expenses / revenue * 100) if revenue > 0 else 0
     transaction_dates = _parse_transaction_dates(df["date"])
@@ -87,6 +95,10 @@ def calculate_kpis(df):
         "profit_margin": float(profit_margin),
         "expense_ratio": float(expense_ratio),
         "transaction_count": int(len(df)),
+        "revenue_transaction_count": int(len(revenue_transactions)),
+        "expense_transaction_count": int(len(expense_transactions)),
+        "average_revenue_transaction": float(average_revenue_transaction),
+        "average_expense_transaction": float(average_expense_transaction),
         "period_start": transaction_dates.min().date().isoformat(),
         "period_end": transaction_dates.max().date().isoformat(),
     }
@@ -98,6 +110,8 @@ def calculate_kpis(df):
     print(f"Profit Margin      : {profit_margin:.2f}%")
     print(f"Expense Ratio      : {expense_ratio:.2f}%")
     print(f"Transactions       : {len(df)}")
+    print(f"Average Revenue Tx : ₹{average_revenue_transaction:.2f}")
+    print(f"Average Expense Tx : ₹{average_expense_transaction:.2f}")
     print(f"Reporting Period   : {summary['period_start']} to {summary['period_end']}")
     print("Growth Rate        : N/A (single period)")
     print("======================\n")
