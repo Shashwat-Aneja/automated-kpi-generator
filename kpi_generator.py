@@ -47,12 +47,13 @@ def validate_transactions(df):
 def filter_transactions_by_period(df, start_date=None, end_date=None):
     """Filter validated transactions by inclusive calendar dates."""
     cleaned = validate_transactions(df)
-    dates = _parse_transaction_dates(cleaned["date"]).map(
-        lambda value: value.normalize()
-    )
+    parsed_dates = _parse_transaction_dates(cleaned["date"])
+    # Compare calendar dates rather than Timestamp objects so mixed timezone
+    # offsets do not trigger tz-aware versus tz-naive comparison errors.
+    dates = parsed_dates.map(lambda value: value.date())
     try:
-        start = pd.Timestamp(start_date).normalize() if start_date is not None else None
-        end = pd.Timestamp(end_date).normalize() if end_date is not None else None
+        start = pd.Timestamp(start_date).date() if start_date is not None else None
+        end = pd.Timestamp(end_date).date() if end_date is not None else None
     except (TypeError, ValueError) as exc:
         raise ValueError("Date filters must be valid dates in YYYY-MM-DD format.") from exc
 
