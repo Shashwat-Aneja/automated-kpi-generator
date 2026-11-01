@@ -39,3 +39,23 @@ def test_period_filter_rejects_empty_result():
 
     with pytest.raises(ValueError, match="No transactions"):
         filter_transactions_by_period(frame, start_date="2026-03-01")
+
+def test_period_filter_handles_mixed_timezone_offsets_by_calendar_date():
+    frame = pd.DataFrame(
+        {
+            "date": [
+                "2026-02-02T00:15:00+05:30",
+                "2026-02-02T23:30:00-05:00",
+                "2026-02-03T00:15:00+05:30",
+            ],
+            "amount": [10, 20, 30],
+            "type": ["revenue", "expense", "revenue"],
+        }
+    )
+
+    filtered = filter_transactions_by_period(
+        frame, start_date="2026-02-02", end_date="2026-02-02"
+    )
+
+    assert filtered["amount"].tolist() == [10, 20]
+
