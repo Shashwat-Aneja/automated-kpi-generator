@@ -57,6 +57,30 @@ def test_calculate_kpis_returns_machine_readable_summary():
         "profit_margin": 85.0,
         "expense_ratio": 15.0,
         "transaction_count": 3,
+        "revenue_transaction_count": 2,
+        "expense_transaction_count": 1,
+        "average_revenue_transaction": 4000.0,
+        "average_expense_transaction": 1200.0,
         "period_start": "2026-02-01",
         "period_end": "2026-02-03",
     }
+
+
+def test_calculate_kpis_handles_mixed_timezone_offsets_in_reporting_period():
+    data = pd.DataFrame(
+        {
+            "date": [
+                "2026-03-02T23:30:00-05:00",
+                "2026-03-01T00:15:00+05:30",
+                "2026-03-03T01:00:00+09:00",
+            ],
+            "amount": [100, 25, 200],
+            "type": ["revenue", "expense", "revenue"],
+        }
+    )
+
+    summary = calculate_kpis(data)
+
+    assert summary["period_start"] == "2026-03-01"
+    assert summary["period_end"] == "2026-03-03"
+    assert summary["profit"] == 275.0

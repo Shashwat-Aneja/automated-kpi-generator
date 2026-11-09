@@ -88,6 +88,8 @@ def calculate_kpis(df):
     profit_margin = (profit / revenue * 100) if revenue > 0 else 0
     expense_ratio = (expenses / revenue * 100) if revenue > 0 else 0
     transaction_dates = _parse_transaction_dates(df["date"])
+    # Mixed UTC offsets cannot be ordered directly; report local calendar dates.
+    calendar_dates = transaction_dates.map(lambda timestamp: timestamp.date())
 
     summary = {
         "total_revenue": float(revenue),
@@ -100,8 +102,8 @@ def calculate_kpis(df):
         "expense_transaction_count": int(len(expense_transactions)),
         "average_revenue_transaction": float(average_revenue_transaction),
         "average_expense_transaction": float(average_expense_transaction),
-        "period_start": transaction_dates.min().date().isoformat(),
-        "period_end": transaction_dates.max().date().isoformat(),
+        "period_start": calendar_dates.min().isoformat(),
+        "period_end": calendar_dates.max().isoformat(),
     }
 
     print("\n===== KPI Report =====")
