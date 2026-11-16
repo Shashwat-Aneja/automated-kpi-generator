@@ -80,8 +80,12 @@ def calculate_kpis(df):
     df = validate_transactions(df)
     revenue_transactions = df.loc[df["type"] == "revenue", "amount"]
     expense_transactions = df.loc[df["type"] == "expense", "amount"]
-    revenue = revenue_transactions.sum()
-    expenses = expense_transactions.sum()
+    # Convert before summing to avoid silent int64 wraparound in pandas sums.
+    try:
+        revenue = math.fsum(float(value) for value in revenue_transactions)
+        expenses = math.fsum(float(value) for value in expense_transactions)
+    except OverflowError as exc:
+        raise ValueError("KPI totals exceed the supported numeric range.") from exc
     profit = revenue - expenses
     average_revenue_transaction = (
         revenue / len(revenue_transactions) if len(revenue_transactions) else 0
@@ -91,6 +95,11 @@ def calculate_kpis(df):
     )
     profit_margin = (profit / revenue * 100) if revenue > 0 else 0
     expense_ratio = (expenses / revenue * 100) if revenue > 0 else 0
+    if not all(math.isfinite(value) for value in (
+        revenue, expenses, profit, profit_margin, expense_ratio,
+        average_revenue_transaction, average_expense_transaction,
+    )):
+        raise ValueError("KPI totals exceed the supported numeric range.")
     transaction_dates = _parse_transaction_dates(df["date"])
     # Mixed UTC offsets cannot be ordered directly; report local calendar dates.
     calendar_dates = transaction_dates.map(lambda timestamp: timestamp.date())
