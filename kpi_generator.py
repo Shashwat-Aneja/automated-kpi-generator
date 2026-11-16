@@ -57,6 +57,8 @@ def filter_transactions_by_period(df, start_date=None, end_date=None):
     except (TypeError, ValueError) as exc:
         raise ValueError("Date filters must be valid dates in YYYY-MM-DD format.") from exc
 
+    if (start_date is not None and pd.isna(start)) or (end_date is not None and pd.isna(end)):
+        raise ValueError("Date filters must be valid dates in YYYY-MM-DD format.")
     if start is not None and end is not None and start > end:
         raise ValueError("Start date must be on or before end date.")
 
