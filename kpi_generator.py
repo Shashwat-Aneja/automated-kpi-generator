@@ -23,6 +23,8 @@ def validate_transactions(df):
 
     cleaned = df.copy()
     cleaned["type"] = cleaned["type"].astype("string").str.strip().str.lower()
+    if cleaned["amount"].map(lambda value: isinstance(value, bool)).any():
+        raise ValueError("Transaction amounts must be numeric, not booleans.")
     cleaned["amount"] = pd.to_numeric(cleaned["amount"], errors="coerce")
 
     parsed_dates = _parse_transaction_dates(cleaned["date"])
