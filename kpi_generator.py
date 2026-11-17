@@ -1,5 +1,9 @@
 import argparse
 import math
+import json
+import os
+import tempfile
+from pathlib import Path
 
 import pandas as pd
 
@@ -134,11 +138,29 @@ def calculate_kpis(df):
     return summary
 
 
+def export_json(summary, output_path):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output_path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(summary, handle, allow_nan=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, output_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Calculate KPIs from transaction CSV data.")
     parser.add_argument("csv_file", help="CSV containing date, amount, and type columns")
     parser.add_argument("--start-date", help="Inclusive reporting start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="Inclusive reporting end date (YYYY-MM-DD)")
+    parser.add_argument("--json-output", help="Atomically save KPI metrics as JSON")
     args = parser.parse_args(argv)
 
     try:
@@ -147,7 +169,13 @@ def main(argv=None):
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
             )
-        calculate_kpis(df)
+        summary = calculate_kpis(df)
+        if args.json_output:
+            source = Path(args.csv_file).resolve()
+            output = Path(args.json_output).expanduser().resolve()
+            if output == source or (output.exists() and output.samefile(source)):
+                raise ValueError("JSON output must differ from the input CSV.")
+            export_json(summary, output)
         return 0
     except (OSError, pd.errors.ParserError, ValueError) as exc:
         print(f"❌ Error: {exc}")

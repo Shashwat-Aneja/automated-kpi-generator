@@ -84,3 +84,5 @@ automated-kpi-generator/
 ---
 
 Developed by **Shashwat Aneja**
+
+Use `--json-output metrics.json` to atomically export the returned KPI metrics for automation. The input CSV is protected from overwrite.
