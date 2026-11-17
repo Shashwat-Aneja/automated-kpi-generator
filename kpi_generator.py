@@ -155,12 +155,25 @@ def export_json(summary, output_path):
             temporary.unlink(missing_ok=True)
 
 
+def compare_periods(current, previous):
+    comparison = {}
+    for metric in ("total_revenue", "total_expenses", "profit"):
+        current_value, previous_value = current[metric], previous[metric]
+        delta = current_value - previous_value
+        growth = delta / previous_value * 100 if previous_value > 0 else None
+        if not math.isfinite(delta) or (growth is not None and not math.isfinite(growth)):
+            raise ValueError("Period comparison exceeds the supported numeric range.")
+        comparison[metric] = {"change": delta, "growth_percent": growth}
+    return comparison
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Calculate KPIs from transaction CSV data.")
     parser.add_argument("csv_file", help="CSV containing date, amount, and type columns")
     parser.add_argument("--start-date", help="Inclusive reporting start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="Inclusive reporting end date (YYYY-MM-DD)")
     parser.add_argument("--json-output", help="Atomically save KPI metrics as JSON")
+    parser.add_argument("--compare-csv", help="Previous-period CSV for revenue, expense and profit changes")
     args = parser.parse_args(argv)
 
     try:
@@ -170,10 +183,17 @@ def main(argv=None):
                 df, start_date=args.start_date, end_date=args.end_date
             )
         summary = calculate_kpis(df)
+        if args.compare_csv:
+            previous = calculate_kpis(pd.read_csv(args.compare_csv))
+            summary["comparison"] = compare_periods(summary, previous)
+            print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
         if args.json_output:
             source = Path(args.csv_file).resolve()
             output = Path(args.json_output).expanduser().resolve()
-            if output == source or (output.exists() and output.samefile(source)):
+            protected = [source]
+            if args.compare_csv:
+                protected.append(Path(args.compare_csv).resolve())
+            if any(output == path or (output.exists() and output.samefile(path)) for path in protected):
                 raise ValueError("JSON output must differ from the input CSV.")
             export_json(summary, output)
         return 0
