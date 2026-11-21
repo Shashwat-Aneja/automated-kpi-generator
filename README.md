@@ -88,3 +88,8 @@ Developed by **Shashwat Aneja**
 Use `--json-output metrics.json` to atomically export the returned KPI metrics for automation. The input CSV is protected from overwrite.
 
 `--compare-csv previous.csv` adds changes in revenue, expenses and profit to the report and JSON output. Percentage growth is undefined (`null`) for zero or negative previous values. Date filters apply to the current CSV; the comparison file defines its own prior period.
+
+
+`--json` prints only the KPI object on success, including optional period comparisons, for scripts and pipelines. Validation failures retain nonzero exit status.
+
+`--monthly` adds sorted calendar-month KPI objects using only rows in the chosen date range. Month assignment follows each transaction’s local calendar date, consistent with the main report.

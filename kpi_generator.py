@@ -1,4 +1,6 @@
 import argparse
+import csv
+from numbers import Number
 import math
 import json
 import os
@@ -14,11 +16,15 @@ SUPPORTED_TYPES = {"revenue", "expense"}
 
 def _parse_transaction_dates(values):
     """Parse each date independently so date-only and timestamp strings can coexist."""
+    if values.map(lambda value: isinstance(value, Number)).any():
+        raise ValueError("Transaction dates must be calendar dates, not numeric epoch offsets.")
     return values.map(lambda value: pd.to_datetime(value, errors="coerce"))
 
 
 def validate_transactions(df):
     """Return a validated copy with normalized transaction types and numeric amounts."""
+    if not isinstance(df, pd.DataFrame) or df.columns.duplicated().any():
+        raise ValueError("Transactions require a DataFrame with unique column names.")
     missing = REQUIRED_COLUMNS.difference(df.columns)
     if missing:
         raise ValueError("CSV missing required columns: " + ", ".join(sorted(missing)))
@@ -29,7 +35,11 @@ def validate_transactions(df):
     cleaned["type"] = cleaned["type"].astype("string").str.strip().str.lower()
     if cleaned["amount"].map(lambda value: isinstance(value, bool)).any():
         raise ValueError("Transaction amounts must be numeric, not booleans.")
+    if pd.api.types.is_complex_dtype(cleaned["amount"]):
+        raise ValueError("Transaction amounts must be real numbers.")
     cleaned["amount"] = pd.to_numeric(cleaned["amount"], errors="coerce")
+    if pd.api.types.is_complex_dtype(cleaned["amount"]):
+        raise ValueError("Transaction amounts must be real numbers.")
 
     parsed_dates = _parse_transaction_dates(cleaned["date"])
     if parsed_dates.isna().any():
@@ -79,7 +89,7 @@ def filter_transactions_by_period(df, start_date=None, end_date=None):
     return filtered
 
 
-def calculate_kpis(df):
+def calculate_kpis(df, print_report=True):
     """Calculate KPIs, print a human-readable report, and return reusable metrics."""
     df = validate_transactions(df)
     revenue_transactions = df.loc[df["type"] == "revenue", "amount"]
@@ -123,19 +133,26 @@ def calculate_kpis(df):
         "period_end": calendar_dates.max().isoformat(),
     }
 
-    print("\n===== KPI Report =====")
-    print(f"Total Revenue      : ₹{revenue}")
-    print(f"Total Expenses     : ₹{expenses}")
-    print(f"Profit             : ₹{profit}")
-    print(f"Profit Margin      : {profit_margin:.2f}%")
-    print(f"Expense Ratio      : {expense_ratio:.2f}%")
-    print(f"Transactions       : {len(df)}")
-    print(f"Average Revenue Tx : ₹{average_revenue_transaction:.2f}")
-    print(f"Average Expense Tx : ₹{average_expense_transaction:.2f}")
-    print(f"Reporting Period   : {summary['period_start']} to {summary['period_end']}")
-    print("Growth Rate        : N/A (single period)")
-    print("======================\n")
+    if print_report:
+        print("\n===== KPI Report =====")
+        print(f"Total Revenue      : ₹{revenue}")
+        print(f"Total Expenses     : ₹{expenses}")
+        print(f"Profit             : ₹{profit}")
+        print(f"Profit Margin      : {profit_margin:.2f}%")
+        print(f"Expense Ratio      : {expense_ratio:.2f}%")
+        print(f"Transactions       : {len(df)}")
+        print(f"Average Revenue Tx : ₹{average_revenue_transaction:.2f}")
+        print(f"Average Expense Tx : ₹{average_expense_transaction:.2f}")
+        print(f"Reporting Period   : {summary['period_start']} to {summary['period_end']}")
+        print("Growth Rate        : N/A (single period)")
+        print("======================\n")
     return summary
+
+
+def monthly_kpis(df):
+    cleaned = validate_transactions(df)
+    months = _parse_transaction_dates(cleaned["date"]).map(lambda value: value.strftime("%Y-%m"))
+    return [{"month": month, **calculate_kpis(cleaned.loc[months == month], print_report=False)} for month in sorted(months.unique())]
 
 
 def export_json(summary, output_path):
@@ -167,6 +184,16 @@ def compare_periods(current, previous):
     return comparison
 
 
+def load_transactions(path):
+    frame = pd.read_csv(path)
+    if isinstance(path, (str, os.PathLike)) and Path(path).is_file():
+        with open(path, encoding="utf-8-sig", newline="") as source:
+            headers = next(csv.reader(source), [])
+        if len(headers) != len(set(headers)):
+            raise ValueError("CSV headers must be unique.")
+    return frame
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Calculate KPIs from transaction CSV data.")
     parser.add_argument("csv_file", help="CSV containing date, amount, and type columns")
@@ -174,19 +201,26 @@ def main(argv=None):
     parser.add_argument("--end-date", help="Inclusive reporting end date (YYYY-MM-DD)")
     parser.add_argument("--json-output", help="Atomically save KPI metrics as JSON")
     parser.add_argument("--compare-csv", help="Previous-period CSV for revenue, expense and profit changes")
+    parser.add_argument("--json", action="store_true", help="Print only a machine-readable KPI report on success")
+    parser.add_argument("--monthly", action="store_true", help="Include calendar-month KPI breakdowns within the selected reporting range")
     args = parser.parse_args(argv)
 
     try:
-        df = pd.read_csv(args.csv_file)
+        df = load_transactions(args.csv_file)
         if args.start_date is not None or args.end_date is not None:
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
             )
-        summary = calculate_kpis(df)
+        summary = calculate_kpis(df, print_report=not args.json)
+        if args.monthly:
+            summary["monthly"] = monthly_kpis(df)
+            if not args.json:
+                print("Monthly KPIs:", json.dumps(summary["monthly"], allow_nan=False))
         if args.compare_csv:
-            previous = calculate_kpis(pd.read_csv(args.compare_csv))
+            previous = calculate_kpis(load_transactions(args.compare_csv), print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
-            print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
+            if not args.json:
+                print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
         if args.json_output:
             source = Path(args.csv_file).resolve()
             output = Path(args.json_output).expanduser().resolve()
@@ -196,6 +230,8 @@ def main(argv=None):
             if any(output == path or (output.exists() and output.samefile(path)) for path in protected):
                 raise ValueError("JSON output must differ from the input CSV.")
             export_json(summary, output)
+        if args.json:
+            print(json.dumps(summary, allow_nan=False))
         return 0
     except (OSError, pd.errors.ParserError, ValueError) as exc:
         print(f"❌ Error: {exc}")
@@ -204,3 +240,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
