@@ -1,4 +1,5 @@
 import argparse
+import csv
 import math
 import json
 import os
@@ -19,6 +20,8 @@ def _parse_transaction_dates(values):
 
 def validate_transactions(df):
     """Return a validated copy with normalized transaction types and numeric amounts."""
+    if not isinstance(df, pd.DataFrame) or df.columns.duplicated().any():
+        raise ValueError("Transactions require a DataFrame with unique column names.")
     missing = REQUIRED_COLUMNS.difference(df.columns)
     if missing:
         raise ValueError("CSV missing required columns: " + ", ".join(sorted(missing)))
@@ -167,6 +170,16 @@ def compare_periods(current, previous):
     return comparison
 
 
+def load_transactions(path):
+    frame = pd.read_csv(path)
+    if isinstance(path, (str, os.PathLike)) and Path(path).is_file():
+        with open(path, encoding="utf-8-sig", newline="") as source:
+            headers = next(csv.reader(source), [])
+        if len(headers) != len(set(headers)):
+            raise ValueError("CSV headers must be unique.")
+    return frame
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Calculate KPIs from transaction CSV data.")
     parser.add_argument("csv_file", help="CSV containing date, amount, and type columns")
@@ -177,14 +190,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        df = pd.read_csv(args.csv_file)
+        df = load_transactions(args.csv_file)
         if args.start_date is not None or args.end_date is not None:
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
             )
         summary = calculate_kpis(df)
         if args.compare_csv:
-            previous = calculate_kpis(pd.read_csv(args.compare_csv))
+            previous = calculate_kpis(load_transactions(args.compare_csv))
             summary["comparison"] = compare_periods(summary, previous)
             print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
         if args.json_output:
@@ -204,3 +217,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
