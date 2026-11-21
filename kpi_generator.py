@@ -32,7 +32,11 @@ def validate_transactions(df):
     cleaned["type"] = cleaned["type"].astype("string").str.strip().str.lower()
     if cleaned["amount"].map(lambda value: isinstance(value, bool)).any():
         raise ValueError("Transaction amounts must be numeric, not booleans.")
+    if pd.api.types.is_complex_dtype(cleaned["amount"]):
+        raise ValueError("Transaction amounts must be real numbers.")
     cleaned["amount"] = pd.to_numeric(cleaned["amount"], errors="coerce")
+    if pd.api.types.is_complex_dtype(cleaned["amount"]):
+        raise ValueError("Transaction amounts must be real numbers.")
 
     parsed_dates = _parse_transaction_dates(cleaned["date"])
     if parsed_dates.isna().any():
