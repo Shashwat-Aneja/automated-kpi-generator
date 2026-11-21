@@ -89,7 +89,7 @@ def filter_transactions_by_period(df, start_date=None, end_date=None):
     return filtered
 
 
-def calculate_kpis(df):
+def calculate_kpis(df, print_report=True):
     """Calculate KPIs, print a human-readable report, and return reusable metrics."""
     df = validate_transactions(df)
     revenue_transactions = df.loc[df["type"] == "revenue", "amount"]
@@ -133,18 +133,19 @@ def calculate_kpis(df):
         "period_end": calendar_dates.max().isoformat(),
     }
 
-    print("\n===== KPI Report =====")
-    print(f"Total Revenue      : ₹{revenue}")
-    print(f"Total Expenses     : ₹{expenses}")
-    print(f"Profit             : ₹{profit}")
-    print(f"Profit Margin      : {profit_margin:.2f}%")
-    print(f"Expense Ratio      : {expense_ratio:.2f}%")
-    print(f"Transactions       : {len(df)}")
-    print(f"Average Revenue Tx : ₹{average_revenue_transaction:.2f}")
-    print(f"Average Expense Tx : ₹{average_expense_transaction:.2f}")
-    print(f"Reporting Period   : {summary['period_start']} to {summary['period_end']}")
-    print("Growth Rate        : N/A (single period)")
-    print("======================\n")
+    if print_report:
+        print("\n===== KPI Report =====")
+        print(f"Total Revenue      : ₹{revenue}")
+        print(f"Total Expenses     : ₹{expenses}")
+        print(f"Profit             : ₹{profit}")
+        print(f"Profit Margin      : {profit_margin:.2f}%")
+        print(f"Expense Ratio      : {expense_ratio:.2f}%")
+        print(f"Transactions       : {len(df)}")
+        print(f"Average Revenue Tx : ₹{average_revenue_transaction:.2f}")
+        print(f"Average Expense Tx : ₹{average_expense_transaction:.2f}")
+        print(f"Reporting Period   : {summary['period_start']} to {summary['period_end']}")
+        print("Growth Rate        : N/A (single period)")
+        print("======================\n")
     return summary
 
 
@@ -194,6 +195,7 @@ def main(argv=None):
     parser.add_argument("--end-date", help="Inclusive reporting end date (YYYY-MM-DD)")
     parser.add_argument("--json-output", help="Atomically save KPI metrics as JSON")
     parser.add_argument("--compare-csv", help="Previous-period CSV for revenue, expense and profit changes")
+    parser.add_argument("--json", action="store_true", help="Print only a machine-readable KPI report on success")
     args = parser.parse_args(argv)
 
     try:
@@ -202,11 +204,12 @@ def main(argv=None):
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
             )
-        summary = calculate_kpis(df)
+        summary = calculate_kpis(df, print_report=not args.json)
         if args.compare_csv:
-            previous = calculate_kpis(load_transactions(args.compare_csv))
+            previous = calculate_kpis(load_transactions(args.compare_csv), print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
-            print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
+            if not args.json:
+                print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
         if args.json_output:
             source = Path(args.csv_file).resolve()
             output = Path(args.json_output).expanduser().resolve()
@@ -216,6 +219,8 @@ def main(argv=None):
             if any(output == path or (output.exists() and output.samefile(path)) for path in protected):
                 raise ValueError("JSON output must differ from the input CSV.")
             export_json(summary, output)
+        if args.json:
+            print(json.dumps(summary, allow_nan=False))
         return 0
     except (OSError, pd.errors.ParserError, ValueError) as exc:
         print(f"❌ Error: {exc}")
