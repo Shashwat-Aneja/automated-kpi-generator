@@ -1,5 +1,6 @@
 import argparse
 import csv
+from numbers import Number
 import math
 import json
 import os
@@ -15,6 +16,8 @@ SUPPORTED_TYPES = {"revenue", "expense"}
 
 def _parse_transaction_dates(values):
     """Parse each date independently so date-only and timestamp strings can coexist."""
+    if values.map(lambda value: isinstance(value, Number)).any():
+        raise ValueError("Transaction dates must be calendar dates, not numeric epoch offsets.")
     return values.map(lambda value: pd.to_datetime(value, errors="coerce"))
 
 
