@@ -149,6 +149,12 @@ def calculate_kpis(df, print_report=True):
     return summary
 
 
+def monthly_kpis(df):
+    cleaned = validate_transactions(df)
+    months = _parse_transaction_dates(cleaned["date"]).map(lambda value: value.strftime("%Y-%m"))
+    return [{"month": month, **calculate_kpis(cleaned.loc[months == month], print_report=False)} for month in sorted(months.unique())]
+
+
 def export_json(summary, output_path):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,6 +202,7 @@ def main(argv=None):
     parser.add_argument("--json-output", help="Atomically save KPI metrics as JSON")
     parser.add_argument("--compare-csv", help="Previous-period CSV for revenue, expense and profit changes")
     parser.add_argument("--json", action="store_true", help="Print only a machine-readable KPI report on success")
+    parser.add_argument("--monthly", action="store_true", help="Include calendar-month KPI breakdowns within the selected reporting range")
     args = parser.parse_args(argv)
 
     try:
@@ -205,6 +212,10 @@ def main(argv=None):
                 df, start_date=args.start_date, end_date=args.end_date
             )
         summary = calculate_kpis(df, print_report=not args.json)
+        if args.monthly:
+            summary["monthly"] = monthly_kpis(df)
+            if not args.json:
+                print("Monthly KPIs:", json.dumps(summary["monthly"], allow_nan=False))
         if args.compare_csv:
             previous = calculate_kpis(load_transactions(args.compare_csv), print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
