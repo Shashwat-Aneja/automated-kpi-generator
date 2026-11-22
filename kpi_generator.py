@@ -152,7 +152,7 @@ def calculate_kpis(df, print_report=True):
 def monthly_kpis(df):
     cleaned = validate_transactions(df)
     months = _parse_transaction_dates(cleaned["date"]).map(lambda value: value.strftime("%Y-%m"))
-    return [{"month": month, **calculate_kpis(cleaned.loc[months == month], print_report=False)} for month in sorted(months.unique())]
+    return [{"month": month, **calculate_kpis(group, print_report=False)} for month, group in cleaned.groupby(months, sort=True)]
 
 
 def export_json(summary, output_path):
