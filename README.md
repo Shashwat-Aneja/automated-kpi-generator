@@ -93,3 +93,5 @@ Use `--json-output metrics.json` to atomically export the returned KPI metrics f
 `--json` prints only the KPI object on success, including optional period comparisons, for scripts and pipelines. Validation failures retain nonzero exit status.
 
 `--monthly` adds sorted calendar-month KPI objects using only rows in the chosen date range. Month assignment follows each transaction’s local calendar date, consistent with the main report.
+
+`--delimiter ";"`, `--delimiter tab` and `--delimiter "|"` support alternate input CSV separators, including quoted fields. Duplicate-header validation uses the selected separator. The default input and all CSV exports remain comma-separated.

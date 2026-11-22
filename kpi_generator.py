@@ -7,6 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -33,7 +34,7 @@ def validate_transactions(df):
 
     cleaned = df.copy()
     cleaned["type"] = cleaned["type"].astype("string").str.strip().str.lower()
-    if cleaned["amount"].map(lambda value: isinstance(value, bool)).any():
+    if cleaned["amount"].map(lambda value: isinstance(value, (bool, np.bool_))).any():
         raise ValueError("Transaction amounts must be numeric, not booleans.")
     if pd.api.types.is_complex_dtype(cleaned["amount"]):
         raise ValueError("Transaction amounts must be real numbers.")
@@ -152,7 +153,7 @@ def calculate_kpis(df, print_report=True):
 def monthly_kpis(df):
     cleaned = validate_transactions(df)
     months = _parse_transaction_dates(cleaned["date"]).map(lambda value: value.strftime("%Y-%m"))
-    return [{"month": month, **calculate_kpis(cleaned.loc[months == month], print_report=False)} for month in sorted(months.unique())]
+    return [{"month": month, **calculate_kpis(group, print_report=False)} for month, group in cleaned.groupby(months, sort=True)]
 
 
 def export_json(summary, output_path):
@@ -184,11 +185,13 @@ def compare_periods(current, previous):
     return comparison
 
 
-def load_transactions(path):
-    frame = pd.read_csv(path)
+def load_transactions(path, delimiter=","):
+    if delimiter not in (",", ";", "\t", "|"):
+        raise ValueError("Unsupported input delimiter.")
+    frame = pd.read_csv(path, **({"sep": delimiter} if delimiter != "," else {}))
     if isinstance(path, (str, os.PathLike)) and Path(path).is_file():
         with open(path, encoding="utf-8-sig", newline="") as source:
-            headers = next(csv.reader(source), [])
+            headers = next(csv.reader(source, delimiter=delimiter), [])
         if len(headers) != len(set(headers)):
             raise ValueError("CSV headers must be unique.")
     return frame
@@ -203,10 +206,12 @@ def main(argv=None):
     parser.add_argument("--compare-csv", help="Previous-period CSV for revenue, expense and profit changes")
     parser.add_argument("--json", action="store_true", help="Print only a machine-readable KPI report on success")
     parser.add_argument("--monthly", action="store_true", help="Include calendar-month KPI breakdowns within the selected reporting range")
+    parser.add_argument("--delimiter", choices=(",", ";", "tab", "|"), default=",", help="Input CSV delimiter; exports remain comma-separated")
     args = parser.parse_args(argv)
+    delimiter = "\t" if args.delimiter == "tab" else args.delimiter
 
     try:
-        df = load_transactions(args.csv_file)
+        df = load_transactions(args.csv_file, **({"delimiter": delimiter} if delimiter != "," else {}))
         if args.start_date is not None or args.end_date is not None:
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
@@ -217,7 +222,7 @@ def main(argv=None):
             if not args.json:
                 print("Monthly KPIs:", json.dumps(summary["monthly"], allow_nan=False))
         if args.compare_csv:
-            previous = calculate_kpis(load_transactions(args.compare_csv), print_report=not args.json)
+            previous = calculate_kpis(load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {})), print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
             if not args.json:
                 print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
