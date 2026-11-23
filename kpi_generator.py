@@ -1,3 +1,4 @@
+import io
 import argparse
 import csv
 from numbers import Number
@@ -185,16 +186,69 @@ def compare_periods(current, previous):
     return comparison
 
 
+def _reject_duplicate_headers(csv_file, delimiter=","):
+    """Inspect original UTF-8 CSV headers without taking ownership of streams."""
+    def header_lines(source):
+        # csv.reader needs physical lines even for StringIO objects whose default
+        # iterator does not recognize CR-only records. Preserve quoted newlines.
+        pending = ""
+        first = True
+        started = False
+        while True:
+            chars = []
+            while True:
+                char = pending or source.read(1)
+                pending = ""
+                if not char:
+                    break
+                if first:
+                    first = False
+                    if char == "\ufeff":
+                        continue
+                chars.append(char)
+                if char == "\r":
+                    following = source.read(1)
+                    if following == "\n":
+                        chars.append(following)
+                    else:
+                        pending = following
+                    break
+                if char == "\n":
+                    break
+            if not chars:
+                return
+            line = "".join(chars)
+            if not started and not line.strip():
+                continue
+            started = True
+            yield line
+
+    if isinstance(csv_file, (str, os.PathLike)):
+        if not Path(csv_file).is_file():
+            return
+        with open(csv_file, encoding="utf-8-sig", newline="") as source:
+            headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+    else:
+        if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
+            raise ValueError("CSV streams must be seekable for header validation.")
+        position = csv_file.tell()
+        binary = isinstance(csv_file.read(0), bytes)
+        source = io.TextIOWrapper(csv_file, encoding="utf-8-sig", newline="") if binary else csv_file
+        try:
+            headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        finally:
+            if binary:
+                source.detach()
+            csv_file.seek(position)
+    if len(headers) != len(set(headers)):
+        raise ValueError("CSV column names must be unique; duplicate headers are ambiguous.")
+
+
 def load_transactions(path, delimiter=","):
     if delimiter not in (",", ";", "\t", "|"):
         raise ValueError("Unsupported input delimiter.")
-    frame = pd.read_csv(path, **({"sep": delimiter} if delimiter != "," else {}))
-    if isinstance(path, (str, os.PathLike)) and Path(path).is_file():
-        with open(path, encoding="utf-8-sig", newline="") as source:
-            headers = next(csv.reader(source, delimiter=delimiter), [])
-        if len(headers) != len(set(headers)):
-            raise ValueError("CSV headers must be unique.")
-    return frame
+    _reject_duplicate_headers(path, delimiter)
+    return pd.read_csv(path, **({"sep": delimiter} if delimiter != "," else {}))
 
 
 def main(argv=None):
@@ -224,8 +278,11 @@ def main(argv=None):
         if args.compare_csv:
             previous = calculate_kpis(load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {})), print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
+            summary["comparison_period"] = {"period_start": previous["period_start"], "period_end": previous["period_end"], "overlaps_current": summary["period_start"] <= previous["period_end"] and previous["period_start"] <= summary["period_end"]}
             if not args.json:
                 print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
+                if summary["comparison_period"]["overlaps_current"]:
+                    print("Comparison period overlaps the current reporting period.")
         if args.json_output:
             source = Path(args.csv_file).resolve()
             output = Path(args.json_output).expanduser().resolve()
