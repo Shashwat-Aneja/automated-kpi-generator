@@ -278,8 +278,11 @@ def main(argv=None):
         if args.compare_csv:
             previous = calculate_kpis(load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {})), print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
+            summary["comparison_period"] = {"period_start": previous["period_start"], "period_end": previous["period_end"], "overlaps_current": summary["period_start"] <= previous["period_end"] and previous["period_start"] <= summary["period_end"]}
             if not args.json:
                 print("Period comparison:", json.dumps(summary["comparison"], allow_nan=False))
+                if summary["comparison_period"]["overlaps_current"]:
+                    print("Comparison period overlaps the current reporting period.")
         if args.json_output:
             source = Path(args.csv_file).resolve()
             output = Path(args.json_output).expanduser().resolve()
