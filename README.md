@@ -95,3 +95,5 @@ Use `--json-output metrics.json` to atomically export the returned KPI metrics f
 `--monthly` adds sorted calendar-month KPI objects using only rows in the chosen date range. Month assignment follows each transaction’s local calendar date, consistent with the main report.
 
 `--delimiter ";"`, `--delimiter tab` and `--delimiter "|"` support alternate input CSV separators, including quoted fields. Duplicate-header validation uses the selected separator. The default input and all CSV exports remain comma-separated.
+
+Seekable caller-owned text and UTF-8 binary CSV streams now receive the same duplicate-header checks as file paths, before pandas can rename ambiguous columns. Validation restores the starting position and leaves caller streams open; nonseekable stream objects are rejected explicitly.
