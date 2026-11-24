@@ -268,7 +268,11 @@ def main(argv=None):
     parser.add_argument("--json", action="store_true", help="Print only a machine-readable KPI report on success")
     parser.add_argument("--monthly", action="store_true", help="Include calendar-month KPI breakdowns within the selected reporting range")
     parser.add_argument("--delimiter", choices=(",", ";", "tab", "|"), default=",", help="Input CSV delimiter; exports remain comma-separated")
+    parser.add_argument("--compare-start-date", help="Inclusive start date within the comparison CSV")
+    parser.add_argument("--compare-end-date", help="Inclusive end date within the comparison CSV")
     args = parser.parse_args(argv)
+    if (args.compare_start_date is not None or args.compare_end_date is not None) and not args.compare_csv:
+        parser.error("Comparison date filters require --compare-csv")
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
 
     try:
@@ -283,7 +287,10 @@ def main(argv=None):
             if not args.json:
                 print("Monthly KPIs:", json.dumps(summary["monthly"], allow_nan=False))
         if args.compare_csv:
-            previous = calculate_kpis(load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {})), print_report=not args.json)
+            previous_frame = load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {}))
+            if args.compare_start_date is not None or args.compare_end_date is not None:
+                previous_frame = filter_transactions_by_period(previous_frame, args.compare_start_date, args.compare_end_date)
+            previous = calculate_kpis(previous_frame, print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
             summary["comparison_period"] = {"period_start": previous["period_start"], "period_end": previous["period_end"], "overlaps_current": summary["period_start"] <= previous["period_end"] and previous["period_start"] <= summary["period_end"]}
             if not args.json:
