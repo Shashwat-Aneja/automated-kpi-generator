@@ -99,3 +99,5 @@ Use `--json-output metrics.json` to atomically export the returned KPI metrics f
 Seekable caller-owned text and UTF-8 binary CSV streams now receive the same duplicate-header checks as file paths, before pandas can rename ambiguous columns. Validation restores the starting position and leaves caller streams open; nonseekable stream objects are rejected explicitly.
 
 Comparison reports disclose the prior file’s actual date range and whether it overlaps the current reporting range. Overlap is informational and does not block comparison; JSON output retains the same growth calculations with this additional context.
+
+CSV paths ending in `.gz`, `.bz2`, or `.xz` are supported without unpacking a separate file. Header validation reads the same compression format as pandas and still rejects duplicate columns, including BOM-prefixed quoted headers and alternate delimiters. Archive containers such as ZIP/TAR are outside this feature.
