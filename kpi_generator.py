@@ -1,3 +1,6 @@
+import gzip
+import bz2
+import lzma
 import io
 import argparse
 import csv
@@ -157,6 +160,20 @@ def monthly_kpis(df):
     return [{"month": month, **calculate_kpis(group, print_report=False)} for month, group in cleaned.groupby(months, sort=True)]
 
 
+def period_kpis(df, frequency):
+    if frequency not in {"month", "quarter", "year"}:
+        raise ValueError("Reporting frequency must be month, quarter, or year.")
+    cleaned = validate_transactions(df)
+    dates = _parse_transaction_dates(cleaned["date"])
+    if frequency == "month":
+        labels = dates.map(lambda date: date.strftime("%Y-%m"))
+    elif frequency == "quarter":
+        labels = dates.map(lambda date: f"{date.year:04d}-Q{(date.month - 1) // 3 + 1}")
+    else:
+        labels = dates.map(lambda date: f"{date.year:04d}")
+    return [{"period": label, **calculate_kpis(group, print_report=False)} for label, group in cleaned.groupby(labels, sort=True)]
+
+
 def export_json(summary, output_path):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -226,8 +243,12 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
     if isinstance(csv_file, (str, os.PathLike)):
         if not Path(csv_file).is_file():
             return
-        with open(csv_file, encoding="utf-8-sig", newline="") as source:
-            headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(Path(csv_file).suffix, open)
+        try:
+            with opener(csv_file, mode="rt", encoding="utf-8-sig", newline="") as source:
+                headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        except (EOFError, lzma.LZMAError) as exc:
+            raise ValueError("Compressed CSV input is corrupt or incomplete.") from exc
     else:
         if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
             raise ValueError("CSV streams must be seekable for header validation.")
@@ -261,7 +282,14 @@ def main(argv=None):
     parser.add_argument("--json", action="store_true", help="Print only a machine-readable KPI report on success")
     parser.add_argument("--monthly", action="store_true", help="Include calendar-month KPI breakdowns within the selected reporting range")
     parser.add_argument("--delimiter", choices=(",", ";", "tab", "|"), default=",", help="Input CSV delimiter; exports remain comma-separated")
+    parser.add_argument("--compare-start-date", help="Inclusive start date within the comparison CSV")
+    parser.add_argument("--compare-end-date", help="Inclusive end date within the comparison CSV")
+    parser.add_argument("--group-by", choices=("month", "quarter", "year"), help="Include KPI breakdowns by calendar reporting period")
     args = parser.parse_args(argv)
+    if args.monthly and args.group_by:
+        parser.error("Use --monthly or --group-by, not both")
+    if (args.compare_start_date is not None or args.compare_end_date is not None) and not args.compare_csv:
+        parser.error("Comparison date filters require --compare-csv")
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
 
     try:
@@ -275,8 +303,15 @@ def main(argv=None):
             summary["monthly"] = monthly_kpis(df)
             if not args.json:
                 print("Monthly KPIs:", json.dumps(summary["monthly"], allow_nan=False))
+        if args.group_by:
+            summary["period_breakdown"] = {"frequency": args.group_by, "periods": period_kpis(df, args.group_by)}
+            if not args.json:
+                print("Period KPIs:", json.dumps(summary["period_breakdown"], allow_nan=False))
         if args.compare_csv:
-            previous = calculate_kpis(load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {})), print_report=not args.json)
+            previous_frame = load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {}))
+            if args.compare_start_date is not None or args.compare_end_date is not None:
+                previous_frame = filter_transactions_by_period(previous_frame, args.compare_start_date, args.compare_end_date)
+            previous = calculate_kpis(previous_frame, print_report=not args.json)
             summary["comparison"] = compare_periods(summary, previous)
             summary["comparison_period"] = {"period_start": previous["period_start"], "period_end": previous["period_end"], "overlaps_current": summary["period_start"] <= previous["period_end"] and previous["period_start"] <= summary["period_end"]}
             if not args.json:
