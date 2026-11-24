@@ -160,6 +160,20 @@ def monthly_kpis(df):
     return [{"month": month, **calculate_kpis(group, print_report=False)} for month, group in cleaned.groupby(months, sort=True)]
 
 
+def period_kpis(df, frequency):
+    if frequency not in {"month", "quarter", "year"}:
+        raise ValueError("Reporting frequency must be month, quarter, or year.")
+    cleaned = validate_transactions(df)
+    dates = _parse_transaction_dates(cleaned["date"])
+    if frequency == "month":
+        labels = dates.map(lambda date: date.strftime("%Y-%m"))
+    elif frequency == "quarter":
+        labels = dates.map(lambda date: f"{date.year:04d}-Q{(date.month - 1) // 3 + 1}")
+    else:
+        labels = dates.map(lambda date: f"{date.year:04d}")
+    return [{"period": label, **calculate_kpis(group, print_report=False)} for label, group in cleaned.groupby(labels, sort=True)]
+
+
 def export_json(summary, output_path):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -270,7 +284,10 @@ def main(argv=None):
     parser.add_argument("--delimiter", choices=(",", ";", "tab", "|"), default=",", help="Input CSV delimiter; exports remain comma-separated")
     parser.add_argument("--compare-start-date", help="Inclusive start date within the comparison CSV")
     parser.add_argument("--compare-end-date", help="Inclusive end date within the comparison CSV")
+    parser.add_argument("--group-by", choices=("month", "quarter", "year"), help="Include KPI breakdowns by calendar reporting period")
     args = parser.parse_args(argv)
+    if args.monthly and args.group_by:
+        parser.error("Use --monthly or --group-by, not both")
     if (args.compare_start_date is not None or args.compare_end_date is not None) and not args.compare_csv:
         parser.error("Comparison date filters require --compare-csv")
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
@@ -286,6 +303,10 @@ def main(argv=None):
             summary["monthly"] = monthly_kpis(df)
             if not args.json:
                 print("Monthly KPIs:", json.dumps(summary["monthly"], allow_nan=False))
+        if args.group_by:
+            summary["period_breakdown"] = {"frequency": args.group_by, "periods": period_kpis(df, args.group_by)}
+            if not args.json:
+                print("Period KPIs:", json.dumps(summary["period_breakdown"], allow_nan=False))
         if args.compare_csv:
             previous_frame = load_transactions(args.compare_csv, **({"delimiter": delimiter} if delimiter != "," else {}))
             if args.compare_start_date is not None or args.compare_end_date is not None:

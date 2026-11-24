@@ -103,3 +103,5 @@ Comparison reports disclose the prior file’s actual date range and whether it 
 CSV paths ending in `.gz`, `.bz2`, or `.xz` are supported without unpacking a separate file. Header validation reads the same compression format as pandas and still rejects duplicate columns, including BOM-prefixed quoted headers and alternate delimiters. Archive containers such as ZIP/TAR are outside this feature.
 
 `--compare-start-date` and `--compare-end-date` independently restrict the prior CSV by inclusive local calendar dates. They require `--compare-csv`; the normal start/end filters continue to select the current period. Empty or reversed comparison windows fail before exporting.
+
+`--group-by month|quarter|year` includes sorted calendar-period breakdowns within the selected current range. Quarterly labels use Q1=January–March. Existing `--monthly` output is retained and cannot be combined with this option; absent calendar periods are not fabricated.
