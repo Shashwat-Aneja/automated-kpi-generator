@@ -105,3 +105,5 @@ CSV paths ending in `.gz`, `.bz2`, or `.xz` are supported without unpacking a se
 `--compare-start-date` and `--compare-end-date` independently restrict the prior CSV by inclusive local calendar dates. They require `--compare-csv`; the normal start/end filters continue to select the current period. Empty or reversed comparison windows fail before exporting.
 
 `--group-by month|quarter|year` includes sorted calendar-period breakdowns within the selected current range. Quarterly labels use Q1=January–March. Existing `--monthly` output is retained and cannot be combined with this option; absent calendar periods are not fabricated.
+
+Corrupt compressed bodies, invalid DEFLATE blocks and header-parser limit failures use the normal validation-error path rather than escaping as EOFError, zlib.error or csv.Error. Header inspection restores caller stream position/ownership on these failures. No invalid input is exported.
