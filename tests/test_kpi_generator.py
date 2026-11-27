@@ -34,8 +34,8 @@ def test_calculate_kpis_handles_zero_revenue_without_division_error(capsys):
     calculate_kpis(data)
 
     output = capsys.readouterr().out
-    assert "Profit Margin      : 0.00%" in output
-    assert "Expense Ratio      : 0.00%" in output
+    assert "Profit Margin      : N/A" in output
+    assert "Expense Ratio      : N/A" in output
     assert "Profit             : ₹-250" in output
 
 
@@ -55,6 +55,7 @@ def test_calculate_kpis_returns_machine_readable_summary():
         "total_expenses": 1200.0,
         "profit": 6800.0,
         "profit_margin": 85.0,
+        "ratios_available": True,
         "expense_ratio": 15.0,
         "transaction_count": 3,
         "revenue_transaction_count": 2,
@@ -84,3 +85,4 @@ def test_calculate_kpis_handles_mixed_timezone_offsets_in_reporting_period():
     assert summary["period_start"] == "2026-03-01"
     assert summary["period_end"] == "2026-03-03"
     assert summary["profit"] == 275.0
+

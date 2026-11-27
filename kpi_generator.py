@@ -128,6 +128,7 @@ def calculate_kpis(df, print_report=True):
         "total_revenue": float(revenue),
         "total_expenses": float(expenses),
         "profit": float(profit),
+        "ratios_available": revenue > 0,
         "profit_margin": float(profit_margin),
         "expense_ratio": float(expense_ratio),
         "transaction_count": int(len(df)),
@@ -144,8 +145,8 @@ def calculate_kpis(df, print_report=True):
         print(f"Total Revenue      : ₹{revenue}")
         print(f"Total Expenses     : ₹{expenses}")
         print(f"Profit             : ₹{profit}")
-        print(f"Profit Margin      : {profit_margin:.2f}%")
-        print(f"Expense Ratio      : {expense_ratio:.2f}%")
+        print("Profit Margin      : " + (f"{profit_margin:.2f}%" if revenue > 0 else "N/A"))
+        print("Expense Ratio      : " + (f"{expense_ratio:.2f}%" if revenue > 0 else "N/A"))
         print(f"Transactions       : {len(df)}")
         print(f"Average Revenue Tx : ₹{average_revenue_transaction:.2f}")
         print(f"Average Expense Tx : ₹{average_expense_transaction:.2f}")
