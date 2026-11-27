@@ -268,18 +268,27 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
         raise ValueError("CSV column names must be unique; duplicate headers are ambiguous.")
 
 
-def load_transactions(path, delimiter=",", max_rows=None):
+def load_transactions(path, delimiter=",", max_rows=None, id_column=None):
     if max_rows is not None and (isinstance(max_rows, bool) or not isinstance(max_rows, int) or not 1 <= max_rows <= 10_000_000):
         raise ValueError("max_rows must be an integer from 1 to 10000000.")
     if delimiter not in (",", ";", "\t", "|"):
         raise ValueError("Unsupported input delimiter.")
+    if id_column is not None and (not isinstance(id_column, str) or not id_column.strip() or id_column in {"date", "type", "amount"}):
+        raise ValueError("Ledger ID column must be a distinct source identifier.")
     _reject_duplicate_headers(path, delimiter)
     try:
-        frame = pd.read_csv(path, **({"nrows": max_rows + 1} if max_rows is not None else {}), **({"sep": delimiter} if delimiter != "," else {}))
+        frame = pd.read_csv(path, **({"converters": {id_column: lambda value: "__id__" + value}} if id_column is not None else {}), **({"nrows": max_rows + 1} if max_rows is not None else {}), **({"sep": delimiter} if delimiter != "," else {}))
     except (EOFError, lzma.LZMAError, zlib.error) as exc:
         raise ValueError("CSV input is corrupt or incomplete.") from exc
     if max_rows is not None and len(frame) > max_rows:
         raise ValueError("CSV input exceeds the configured row limit.")
+    if id_column is not None:
+        if id_column not in frame.columns:
+            raise ValueError("Ledger ID column was not found.")
+        frame[id_column] = frame[id_column].astype("string").str.slice(6)
+        identifiers = frame[id_column].str.strip()
+        if identifiers.isna().any() or identifiers.eq("").any() or identifiers.duplicated().any():
+            raise ValueError("Ledger IDs must be non-empty and unique within each input file.")
     return frame
 
 
@@ -297,6 +306,7 @@ def main(argv=None):
     parser.add_argument("--compare-end-date", help="Inclusive end date within the comparison CSV")
     parser.add_argument("--group-by", choices=("month", "quarter", "year"), help="Include KPI breakdowns by calendar reporting period")
     parser.add_argument("--max-input-rows", type=int, help="Reject CSV files exceeding this raw row budget (1..10000000)")
+    parser.add_argument("--id-column", help="Validate unique ledger IDs before period filtering")
     args = parser.parse_args(argv)
     if args.max_input_rows is not None and not 1 <= args.max_input_rows <= 10_000_000:
         parser.error("--max-input-rows must be from 1 to 10000000")
@@ -307,7 +317,7 @@ def main(argv=None):
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
 
     try:
-        df = load_transactions(args.csv_file, **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
+        df = load_transactions(args.csv_file, **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
         if args.start_date is not None or args.end_date is not None:
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
@@ -322,7 +332,7 @@ def main(argv=None):
             if not args.json:
                 print("Period KPIs:", json.dumps(summary["period_breakdown"], allow_nan=False))
         if args.compare_csv:
-            previous_frame = load_transactions(args.compare_csv, **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
+            previous_frame = load_transactions(args.compare_csv, **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
             if args.compare_start_date is not None or args.compare_end_date is not None:
                 previous_frame = filter_transactions_by_period(previous_frame, args.compare_start_date, args.compare_end_date)
             previous = calculate_kpis(previous_frame, print_report=not args.json)
