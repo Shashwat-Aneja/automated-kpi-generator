@@ -269,7 +269,58 @@ def _reject_duplicate_headers(csv_file, delimiter=",", encoding="utf-8"):
         raise ValueError("CSV column names must be unique; duplicate headers are ambiguous.")
 
 
-def load_transactions(path, delimiter=",", max_rows=None, id_column=None, encoding="utf-8"):
+def _snapshot_csv_input(csv_file, max_bytes, encoding):
+    """Snapshot bounded decompressed CSV bytes without consuming caller streams."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= 64 * 1024 * 1024:
+        raise ValueError("max_bytes must be an integer from 1 to 67108864.")
+    def read_complete(source):
+        chunks = []
+        units = 0
+        kind = None
+        while units <= max_bytes:
+            chunk = source.read(min(65536, max_bytes + 1 - units))
+            if not isinstance(chunk, (str, bytes)):
+                raise ValueError("CSV stream read must return bytes or text.")
+            if kind is not None and type(chunk) is not kind:
+                raise ValueError("CSV stream read type must be consistent.")
+            kind = type(chunk)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            units += len(chunk)
+        # Encode text once so codecs with BOMs do not insert one per chunk.
+        raw = ("".join(chunks).encode(encoding) if kind is str else b"".join(chunks))
+        return raw
+    if isinstance(csv_file, (str, os.PathLike)):
+        path = Path(csv_file)
+        if not path.is_file():
+            raise ValueError("Bounded CSV input must be a local regular file or seekable stream.")
+        opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(path.suffix.lower(), open)
+        try:
+            with opener(path, "rb") as source:
+                raw = read_complete(source)
+        except (EOFError, lzma.LZMAError, zlib.error) as exc:
+            raise ValueError("CSV input is corrupt or incomplete.") from exc
+    else:
+        if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
+            raise ValueError("Bounded CSV streams must be seekable.")
+        position = csv_file.tell()
+        try:
+            raw = read_complete(csv_file)
+        except (EOFError, lzma.LZMAError, zlib.error) as exc:
+            raise ValueError("CSV input is corrupt or incomplete.") from exc
+        finally:
+            csv_file.seek(position)
+        if isinstance(raw, str):
+            raw = raw.encode(encoding)
+        if not isinstance(raw, bytes):
+            raise ValueError("CSV stream read must return bytes or text.")
+    if len(raw) > max_bytes:
+        raise ValueError("CSV input exceeds the configured decompressed byte limit.")
+    return io.BytesIO(raw)
+
+
+def load_transactions(path, delimiter=",", max_rows=None, id_column=None, encoding="utf-8", max_bytes=None):
     if encoding not in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
         raise ValueError("Unsupported input encoding.")
     if max_rows is not None and (isinstance(max_rows, bool) or not isinstance(max_rows, int) or not 1 <= max_rows <= 10_000_000):
@@ -278,6 +329,8 @@ def load_transactions(path, delimiter=",", max_rows=None, id_column=None, encodi
         raise ValueError("Unsupported input delimiter.")
     if id_column is not None and (not isinstance(id_column, str) or not id_column.strip() or id_column in {"date", "type", "amount"}):
         raise ValueError("Ledger ID column must be a distinct source identifier.")
+    if max_bytes is not None:
+        path = _snapshot_csv_input(path, max_bytes, encoding)
     _reject_duplicate_headers(path, delimiter, encoding=encoding)
     try:
         frame = pd.read_csv(path, **({"encoding": encoding} if encoding != "utf-8" else {}), **({"converters": {id_column: lambda value: "__id__" + value}} if id_column is not None else {}), **({"nrows": max_rows + 1} if max_rows is not None else {}), **({"sep": delimiter} if delimiter != "," else {}))
@@ -311,7 +364,10 @@ def main(argv=None):
     parser.add_argument("--max-input-rows", type=int, help="Reject CSV files exceeding this raw row budget (1..10000000)")
     parser.add_argument("--id-column", help="Validate unique ledger IDs before period filtering")
     parser.add_argument("--encoding", choices=("utf-8", "utf-8-sig", "cp1252", "latin-1"), default="utf-8", help="Input CSV text encoding; output encoding remains UTF-8")
+    parser.add_argument("--max-input-bytes", type=int, help="Snapshot and bound each decompressed CSV input (1..67108864 bytes)")
     args = parser.parse_args(argv)
+    if args.max_input_bytes is not None and not 1 <= args.max_input_bytes <= 64 * 1024 * 1024:
+        parser.error("--max-input-bytes must be from 1 to 67108864")
     if args.max_input_rows is not None and not 1 <= args.max_input_rows <= 10_000_000:
         parser.error("--max-input-rows must be from 1 to 10000000")
     if args.monthly and args.group_by:
@@ -321,7 +377,7 @@ def main(argv=None):
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
 
     try:
-        df = load_transactions(args.csv_file, **({"encoding": args.encoding} if args.encoding != "utf-8" else {}), **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
+        df = load_transactions(args.csv_file, **({"max_bytes": args.max_input_bytes} if args.max_input_bytes is not None else {}), **({"encoding": args.encoding} if args.encoding != "utf-8" else {}), **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
         if args.start_date is not None or args.end_date is not None:
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
@@ -336,7 +392,7 @@ def main(argv=None):
             if not args.json:
                 print("Period KPIs:", json.dumps(summary["period_breakdown"], allow_nan=False))
         if args.compare_csv:
-            previous_frame = load_transactions(args.compare_csv, **({"encoding": args.encoding} if args.encoding != "utf-8" else {}), **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
+            previous_frame = load_transactions(args.compare_csv, **({"max_bytes": args.max_input_bytes} if args.max_input_bytes is not None else {}), **({"encoding": args.encoding} if args.encoding != "utf-8" else {}), **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
             if args.compare_start_date is not None or args.compare_end_date is not None:
                 previous_frame = filter_transactions_by_period(previous_frame, args.compare_start_date, args.compare_end_date)
             previous = calculate_kpis(previous_frame, print_report=not args.json)
