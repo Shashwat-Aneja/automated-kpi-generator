@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import zlib
 import gzip
 import bz2
@@ -320,7 +322,7 @@ def _snapshot_csv_input(csv_file, max_bytes, encoding):
     return io.BytesIO(raw)
 
 
-def load_transactions(path, delimiter=",", max_rows=None, id_column=None, encoding="utf-8", max_bytes=None):
+def load_transactions(path, delimiter=",", max_rows=None, id_column=None, encoding="utf-8", max_bytes=None, expected_sha256=None):
     if encoding not in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
         raise ValueError("Unsupported input encoding.")
     if max_rows is not None and (isinstance(max_rows, bool) or not isinstance(max_rows, int) or not 1 <= max_rows <= 10_000_000):
@@ -329,7 +331,14 @@ def load_transactions(path, delimiter=",", max_rows=None, id_column=None, encodi
         raise ValueError("Unsupported input delimiter.")
     if id_column is not None and (not isinstance(id_column, str) or not id_column.strip() or id_column in {"date", "type", "amount"}):
         raise ValueError("Ledger ID column must be a distinct source identifier.")
-    if max_bytes is not None:
+    if expected_sha256 is not None:
+        if not isinstance(expected_sha256, str) or len(expected_sha256) != 64 or any(c not in "0123456789abcdefABCDEF" for c in expected_sha256):
+            raise ValueError("expected_sha256 must be a 64-character hexadecimal digest.")
+        path = _snapshot_csv_input(path, max_bytes if max_bytes is not None else 64 * 1024 * 1024, encoding)
+        actual = hashlib.sha256(path.getbuffer()).hexdigest()
+        if not hmac.compare_digest(actual, expected_sha256.lower()):
+            raise ValueError("CSV input SHA-256 does not match the expected digest.")
+    elif max_bytes is not None:
         path = _snapshot_csv_input(path, max_bytes, encoding)
     _reject_duplicate_headers(path, delimiter, encoding=encoding)
     try:
@@ -365,6 +374,7 @@ def main(argv=None):
     parser.add_argument("--id-column", help="Validate unique ledger IDs before period filtering")
     parser.add_argument("--encoding", choices=("utf-8", "utf-8-sig", "cp1252", "latin-1"), default="utf-8", help="Input CSV text encoding; output encoding remains UTF-8")
     parser.add_argument("--max-input-bytes", type=int, help="Snapshot and bound each decompressed CSV input (1..67108864 bytes)")
+    parser.add_argument("--expect-input-sha256", help="Require the main CSV input to match this SHA-256 of decompressed bytes")
     args = parser.parse_args(argv)
     if args.max_input_bytes is not None and not 1 <= args.max_input_bytes <= 64 * 1024 * 1024:
         parser.error("--max-input-bytes must be from 1 to 67108864")
@@ -377,7 +387,7 @@ def main(argv=None):
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
 
     try:
-        df = load_transactions(args.csv_file, **({"max_bytes": args.max_input_bytes} if args.max_input_bytes is not None else {}), **({"encoding": args.encoding} if args.encoding != "utf-8" else {}), **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
+        df = load_transactions(args.csv_file, **({"expected_sha256": args.expect_input_sha256} if args.expect_input_sha256 is not None else {}), **({"max_bytes": args.max_input_bytes} if args.max_input_bytes is not None else {}), **({"encoding": args.encoding} if args.encoding != "utf-8" else {}), **({"id_column": args.id_column} if args.id_column is not None else {}), **({"max_rows": args.max_input_rows} if args.max_input_rows is not None else {}), **({"delimiter": delimiter} if delimiter != "," else {}))
         if args.start_date is not None or args.end_date is not None:
             df = filter_transactions_by_period(
                 df, start_date=args.start_date, end_date=args.end_date
