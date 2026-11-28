@@ -115,3 +115,5 @@ Use `--max-input-rows 100000` to reject an input file with more than that many d
 Use `--id-column transaction_id` to preserve literal ledger IDs and reject blank or whitespace-equivalent duplicate IDs within each raw input file, before date filtering. The same column is required independently in comparison files; cross-file reuse is allowed.
 
 JSON `ratios_available` marks whether revenue-based ratios are meaningful. Legacy numeric zero sentinels remain for compatibility; human reports show N/A when revenue is not positive.
+
+`--encoding utf-8|utf-8-sig|cp1252|latin-1` explicitly selects CSV input decoding, including compressed files and binary streams. Header validation and data parsing use the same encoding; comparison/training/scoring inputs share it. The default remains UTF-8, and export encoding is unchanged. Text streams are already decoded by their caller.
